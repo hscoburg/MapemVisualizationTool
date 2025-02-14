@@ -184,8 +184,11 @@ class MainApplication(Frame):
             self.warningLabel.pack()
             return 
 
-        for xmlTag, intersection in mapem["MAPEM"]["map"]["intersections"].items(): 
-            name = intersection["name"]
+        for xmlTag, intersection in mapem["MAPEM"]["map"]["intersections"].items():
+            if "name" in intersection:
+                name = intersection["name"]
+            else:
+                name = self.filename.get().rsplit(".", 1)[0].rsplit("/",1)[1]
             laneDict = {}
             intersection["refPoint"]["lat"] = int(intersection["refPoint"]["lat"])/self._lonLatFloatAccuracy
             intersection["refPoint"]["long"] = int(intersection["refPoint"]["long"])/self._lonLatFloatAccuracy
