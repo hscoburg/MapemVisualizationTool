@@ -6,8 +6,8 @@ import threading
 import pymap3d as pm
 import matplotlib.pyplot as plt
 import random
+import tkinter.filedialog as fd
 
-from tkinter.filedialog import askopenfilename
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from tkinter import StringVar, BooleanVar, LabelFrame, Label, Checkbutton, Button, Frame
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -23,7 +23,7 @@ class MainApplication(Frame):
         Frame.__init__(self, parent, *args, **kwargs)
         self.parent = parent
         
-        self.filename = StringVar()
+        self.selectedFiles = []
         self.actionMessage = StringVar()
         self.warningMessage = StringVar()
         printGraph = BooleanVar()
@@ -55,42 +55,71 @@ class MainApplication(Frame):
         startButton.pack()
     
     def drop(self, event):
-        if (event.data[0] =='{'):
-            event.data = event.data[1:len(event.data)-1]
-        self.filename.set(event.data)
-        self.displayText.set("selected file: \n" + event.data)
+        self.selectedFiles = []
+        files = root.tk.splitlist(event.data)
+        selectedFilenames = ""
+        for file in files:
+            fileStrVar = StringVar()
+            fileStrVar.set(file)
+            self.selectedFiles.append(fileStrVar)
+            selectedFilenames = selectedFilenames + "\n" + file.split("/")[-1]
+        self.displayText.set("selected file:" + selectedFilenames)
         self.warningMessage.set("")
         self.warningLabel.pack_forget()  
+        
+        self.GetFilesAsListsOfDicts(self.selectedFiles)   
     
     def Click(self, event):
-        self.filename.set(askopenfilename())
-        if  self.filename.get()!="":
-            self.displayText.set("selected file: \n" + self.filename.get())
+        #self.filename.set(fd.askopenfilenames(parent= root, title='Choose a file', filetypes=[('MAPEM files', '*.xer;*.gser;*.json;*.xml')]))
+        self.selectedFiles = []
+        files = fd.askopenfilenames(parent= root, title='Choose a file', filetypes=[('MAPEM files', '*.xer;*.gser;*.json;*.xml')])
+        fileNames = root.tk.splitlist(files)
+        fileNamesString = ""
+        for file in fileNames:
+            fileStrVar = StringVar()
+            fileStrVar.set(file)
+            self.selectedFiles.append(fileStrVar) 
+            fileNamesString =  fileNamesString + "\n" + file.split("/")[-1] 
+            
+        if  len(self.selectedFiles) > 0:               
+            self.displayText.set("selected files:" + fileNamesString)
             self.warningMessage.set("")
-            self.warningLabel.pack_forget()   
+            self.warningLabel.pack_forget()
+            
+            self.GetFilesAsListsOfDicts(self.selectedFiles)   
     
     def StartButton(self, printGraph, generateGPX):
         self.warningLabel.pack_forget()     
         self.messageLabel.pack_forget()
         
-        if self.filename.get()== self.filename._default:
+        if len(self.selectedFiles) == 0 :
             # no file given 
             self.warningMessage.set("please select a File here")
             self.warningLabel.pack()
             return
-        self.VisualizeMapem(self.filename.get(), printGraph.get(), generateGPX.get())
+        self.VisualizeMapem(self.selectedFiles, printGraph.get(), generateGPX.get())
     #endregion
     
-    def VisualizeMapem(self, filename, printGraph, generateGpx):
-        fileAsDict = self.GetFileAsDict(filename)
-        intersectionsDict = self.CalcualteLanesAbsoluteOffsetList(fileAsDict)
-        if intersectionsDict == None:
-            return
-        
-        lanes, connectionLanes, refPoint = self.getLaneCoordiates(intersectionsDict)
-        
+    def VisualizeMapem(self, filenames, printGraph, generateGpx):
+        lanes = []
+        connectionLanes = []
+        refPoint = None
+        intersectionDict = {"laneDict": {}, "connectionList": [], "RefPoint": {}} 
+        for filename in filenames:
+            fileAsDict = self.GetFileAsDict(filename.get())
+            new_intersectionsDict = self.CalcualteLanesAbsoluteOffsetList(fileAsDict)
+            intersectionDict["laneDict"].update(new_intersectionsDict["laneDict"])
+            intersectionDict["connectionList"].extend(new_intersectionsDict["connectionList"])
+            intersectionDict["RefPoint"] = new_intersectionsDict["RefPoint"]
+            (new_intersectionsDict)
+            if intersectionDict == None:
+                return
+            
+        lanes,connectionLanes,refPoint = self.getLaneCoordiates(intersectionDict)
+            
+
         if generateGpx: 
-            gpxThread = threading.Thread(target=self.generateGpxFile, args=(intersectionsDict,), daemon= True)
+            gpxThread = threading.Thread(target=self.generateGpxFile, args=(intersectionDict,), daemon= True)
             gpxThread.start()
         
         if printGraph:
@@ -114,15 +143,10 @@ class MainApplication(Frame):
     #endregion
     
     #region Calculations
-    def getLaneCoordiates(self, intersectionsDict):
-        intersection = None
-        for mapem in intersectionsDict.values():
-            intersection = mapem
-            #TODO: Fill with life!
-            
-        laneDict = intersection["laneDict"]
-        refPoint = intersection["RefPoint"]
-        connectionList = intersection["connectionList"]
+    def getLaneCoordiates(self, intersectionDict):
+        laneDict = intersectionDict["laneDict"]
+        refPoint = intersectionDict["RefPoint"]
+        connectionList = intersectionDict["connectionList"]
         
         lanes = []
         
@@ -177,7 +201,7 @@ class MainApplication(Frame):
         return lanes, connectionLanes, refPoint
     
     def CalcualteLanesAbsoluteOffsetList(self, mapem):
-        intersectionsDict = {}
+        intersectionDict = {}
         
         if "MAPEM" not in mapem:
             self.warningMessage.set("No MAPEM found in file\nOnly .xer and .gser files are supported")
@@ -185,7 +209,6 @@ class MainApplication(Frame):
             return 
 
         for xmlTag, intersection in mapem["MAPEM"]["map"]["intersections"].items(): 
-            name = intersection["name"]
             laneDict = {}
             intersection["refPoint"]["lat"] = int(intersection["refPoint"]["lat"])/self._lonLatFloatAccuracy
             intersection["refPoint"]["long"] = int(intersection["refPoint"]["long"])/self._lonLatFloatAccuracy
@@ -242,12 +265,11 @@ class MainApplication(Frame):
                         
                     connectItem = [ startPoint , endPoint, signalGroup]    
                     connectionList.append(connectItem)
-            intersectionsDict.update({name : {"RefPoint": refPoint,
-                                              "laneDict": laneDict,
-                                              "connectionList" : connectionList
-                                              }
-                                      })
-        return intersectionsDict
+                    
+            intersectionDict.update( {"RefPoint": refPoint})
+            intersectionDict.update( {"laneDict": laneDict})
+            intersectionDict.update( {"connectionList" : connectionList})
+        return intersectionDict
                 
     def LongLatCalc(self, refPoint, xCentimeters, yCentimeters):
         xMeters = xCentimeters / self._meterToCentimeter
@@ -266,15 +288,46 @@ class MainApplication(Frame):
                                h0 = 0
                                )
         return x/self._meterToCentimeter ,y/self._meterToCentimeter #working with centimeters 
+    
+    """Validate if the given files are in the same sematic structur, MAPEM or PCAP Export, 
+    and if they belong to the same Mapem given by name and framenumber, 
+    if not block start button """
+    def GivenFilesHandleSameMAPEM(self, dictList):
+        #singleMapem
+        if len(dictList) == 1:
+            if "layerID" in dictList[0]["MAPEM"]["map"]:
+                    return[False, "Single Mapem given where multiple are expected"]
+            
+            return [True]
+        
+        id = None
+        maxLayers = int(dictList[0]["MAPEM"]["map"]["layerID"][0])
+        listHandledLayerIds = []
+        
+        for dict in dictList:
+            #check LayerIds
+            if id == None:
+                id = dict["MAPEM"]["map"]["intersections"]["IntersectionGeometry"]["id"]
+            else:
+                if id != dict["MAPEM"]["map"]["intersections"]["IntersectionGeometry"]["id"]:
+                    return [False, "Intersection Id different"]
+            currentLayerId = int(dict["MAPEM"]["map"]["layerID"]) - maxLayers * 10
+            if currentLayerId > maxLayers:
+                return [False, "LayerId not in range"]
+            if currentLayerId not in listHandledLayerIds:
+                listHandledLayerIds.append(currentLayerId)
+            else:
+                return [False, "LayerId not unique"]
+        
+        if len(listHandledLayerIds) != maxLayers:
+            return [False, "not all layers of Mapem handled"]
+                    
+        return [True]
+        
     #endregion
     
     #region GPX-File
-    def generateGpxFile(self, intersectionsDict):
-        intersection = None
-        for mapem in intersectionsDict.values():
-            intersection = mapem
-            #TODO: Fill with life!
-            
+    def generateGpxFile(self, intersection):
         laneDict = intersection["laneDict"]
         refPoint = intersection["RefPoint"]
         connectionList = intersection["connectionList"]
@@ -340,7 +393,10 @@ class MainApplication(Frame):
         symbolFlagRefPoint = SubElement(refPointGPX, "sym")
         symbolFlagRefPoint.text = "flag, red" #idk if this works :D ///should identify the symbol used by gpx client software, but doesnt seem to be unified
 
-        gpxfilename  = self.filename.get().rsplit(".", 1)[0] + ".gpx"
+        gpxfilename  = ""
+        for file in self.selectedFiles:
+            gpxfilename =  gpxfilename + file.get().rsplit("/")[-1].rsplit(".", 1)[0] + "---"
+        gpxfilename = gpxfilename[0:-3] + ".gpx"
         file = open(gpxfilename, "w")
         gpxString = tostring(rootGPX , encoding="utf8").decode("utf8")  #seperate decode, so its no binary string, write to file would fail otherwise
         
@@ -351,6 +407,13 @@ class MainApplication(Frame):
  
         logging.info("GPX generation Thread finishing")
     #endregion
+    
+    #region Parse Pcap File
+    def ParsePcapFileToMapemDict(self, pcapDict):
+        for frameFromPCAP in pcapDict[0]["frames"]:
+            print("frame: ", frameFromPCAP)
+        return dict
+    
     #region Parse File
     def GetFileAsDict(self, filename):
         dict = None
@@ -372,9 +435,59 @@ class MainApplication(Frame):
         except json.JSONDecodeError:
             pass
         
+        try:
+            if dict[0]["_type"] == "pcap_file":
+                print("pcap file detected")
+                dict = self.ParsePcapFileToMapemDict(dict)
+        except KeyError:
+            pass
         #TODO: handle pcap exports!!!
         
         return dict
+    
+    #TODO: delete methode above, when done
+    def GetFilesAsListsOfDicts(self, filenameList):
+        
+        dictList = []
+        
+        for filename in filenameList:
+            dict = None
+            
+            #parsing the file as mapem from json or xml, since we cant ensure the file ending to be correct (.xer.gser) we just try to parse and if it fails it fails.
+            #TODO: maybe dont do it with exception handeling, but by the file given ...
+            try:
+                with open(filename.get(), 'r', encoding='utf-8') as file:
+                    xmlStr = file.read()
+                    dict = xmltodict.parse(xmlStr) 
+                            
+            except xml.parsers.expat.ExpatError:  
+                pass
+            
+            try: 
+                file = open(filename.get())
+                dict = json.load(file)
+                    
+            except json.JSONDecodeError:
+                pass
+            
+            try:
+                if dict[0]["_type"] == "pcap_file":
+                    print("pcap file detected")
+                    dict = self.ParsePcapFileToMapemDict(dict)
+            except KeyError:
+                pass
+            #TODO: handle pcap exports!!!
+            
+            dictList.append(dict)
+            
+        givenMapemCheckResult = self.GivenFilesHandleSameMAPEM(dictList)	
+        if givenMapemCheckResult[0]:
+            return dictList
+        self.warningLabel.pack()
+        self.warningMessage.set(givenMapemCheckResult[1])
+        #TODO: muss hier noch mehr gemaht werden? 
+            
+    
 #endregion
         
 
