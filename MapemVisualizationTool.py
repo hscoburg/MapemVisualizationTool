@@ -426,38 +426,31 @@ class MainApplication(Frame):
     However, the "_tree" elements are duplicated by other elemnts, which have the same name, but just give the len of the following tree structure, those need to be overwritten.
     Furthermore lists have a different structure, the key of the listelements are "Item 0" counting upwards, the regualr expression cobnverts those into a list.    
     '''
-    #def remove_substring_from_keys(self, data, etsiSubstring, fullyRemoveSubstring, overwriteSubstring):
-    def remove_substring_from_keys(self, data, substring1, substring2, substring3):
+    def remove_substring_from_keys(self, data, itsPrefix, elementSuffix, treeSuffix):
         if isinstance(data, dict):
             new_dict = {}
 
             for key, value in data.items():
-                # Nur Keys mit gewünschtem Prefix bearbeiten
-                if substring1 not in key:
+                if itsPrefix not in key:
                     continue
 
-                # Ist ein "_tree"-Key?
-                if key.endswith(substring3):
-                    base_key = key.replace(substring1, "").replace(substring3, "")
+                if key.endswith(treeSuffix):
+                    base_key = key.replace(itsPrefix, "").replace(treeSuffix, "")
                     tree_dict = value
-
-                    # Nur wenn Items vorhanden
 
                     if isinstance(tree_dict, dict) and "Item 0" in tree_dict:
                         first_item = tree_dict["Item 0"]
                         if isinstance(first_item, dict):
-                            # Hole den ersten element-Key aus "Item 0"
                             element_key = next(iter(first_item))
-                            element_type = element_key.replace(substring1, "").replace(substring2, "")
+                            element_type = element_key.replace(itsPrefix, "").replace(elementSuffix, "")
                             list_key = base_key
 
-                            # Baue Liste aller "_element"-Einträge
                             elements = []
                             for item in tree_dict.values():
                                 if isinstance(item, dict) and element_key in item:
                                     cleaned = self.remove_substring_from_keys(
                                         item[element_key],
-                                        substring1, substring2, substring3
+                                        itsPrefix, elementSuffix, treeSuffix
                                     )
                                     elements.append(cleaned)
                             if len(elements) == 1:
@@ -468,10 +461,11 @@ class MainApplication(Frame):
                                 new_dict[list_key] = []
                             new_dict[list_key] = (newDict2)
                     
+                    #handel tree strucutres
                     elif isinstance(tree_dict, dict) and any(key.endswith("_tree") for key in tree_dict):
                         list_key = base_key
                         element_key =  next((key for key in tree_dict if key.endswith("_tree")), None)
-                        element_type = element_key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
+                        element_type = element_key.replace(itsPrefix, "").replace(elementSuffix, "").replace(treeSuffix, "")
                         
                         elements = []
                         new_dict3 = {}
@@ -481,11 +475,10 @@ class MainApplication(Frame):
                                     
                                     cleaned = self.remove_substring_from_keys(
                                         items[itemKey],
-                                        substring1, substring2, substring3
+                                        itsPrefix, elementSuffix, treeSuffix
                                     )
                                     subElementKey = next(iter(cleaned)) 
                                     elements.append(list(cleaned.values())[0])
-                        
                         
                         if len(elements) == 1:
                             new_dict3 = {subElementKey: elements[0]}
@@ -497,10 +490,11 @@ class MainApplication(Frame):
                             new_dict[list_key] = []
                         new_dict[list_key] = (newDict2)
                     
+                    #handel element structures
                     elif isinstance(tree_dict, dict) and any(key.endswith("_element") for key in tree_dict):
                         list_key = base_key
                         element_key =  next((key for key in tree_dict if key.endswith("_element")), None)
-                        element_type = element_key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
+                        element_type = element_key.replace(itsPrefix, "").replace(elementSuffix, "").replace(treeSuffix, "")
                         
                         elements = []
                         new_dict3 = {}
@@ -510,9 +504,9 @@ class MainApplication(Frame):
                                     
                                     cleaned = self.remove_substring_from_keys(
                                         items[itemKey],
-                                        substring1, substring2, substring3
+                                        itsPrefix, elementSuffix, treeSuffix
                                     )
-                                    new_dict3[itemKey.replace(substring1, "")] = cleaned
+                                    new_dict3[itemKey.replace(itsPrefix, "")] = cleaned
                         
                         newDict2 = {element_type: new_dict3}
                         if type(new_dict[list_key]) is str:
@@ -521,12 +515,12 @@ class MainApplication(Frame):
                             
                         
                 else:
-                    cleaned_key = key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
-                    new_dict[cleaned_key] = self.remove_substring_from_keys(value, substring1, substring2, substring3)
+                    cleaned_key = key.replace(itsPrefix, "").replace(elementSuffix, "").replace(treeSuffix, "")
+                    new_dict[cleaned_key] = self.remove_substring_from_keys(value, itsPrefix, elementSuffix, treeSuffix)
                     
             return new_dict
         elif isinstance(data, list):
-            return [self.remove_substring_from_keys(item, substring1, substring2, substring3) for item in data]
+            return [self.remove_substring_from_keys(item, itsPrefix, elementSuffix, treeSuffix) for item in data]
         else:
             return data
             
