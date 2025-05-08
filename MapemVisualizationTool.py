@@ -23,7 +23,6 @@ class MainApplication(Frame):
     def __init__(self, parent, *args, **kwargs):
         Frame.__init__(self, parent, *args, **kwargs)
         self.parent = parent
-        
         self.selectedFiles = []
         self.mapems = []
         self.actionMessage = StringVar()
@@ -121,6 +120,7 @@ class MainApplication(Frame):
 
         if generateGpx: 
             gpxThread = threading.Thread(target=self.generateGpxFile, args=(intersectionDict,), daemon= True)
+
             gpxThread.start()
         
         if printGraph:
@@ -148,6 +148,7 @@ class MainApplication(Frame):
         laneDict = intersectionDict["laneDict"]
         refPoint = intersectionDict["RefPoint"]
         connectionList = intersectionDict["connectionList"]
+
         
         lanes = []
         
@@ -176,11 +177,10 @@ class MainApplication(Frame):
                 elif "Lon" in lane[0]:
                     keywordX= "Lon"
                     keywordY= "Lat"
-                    multiplicator = 10000000
-                    
+                    multiplicator = 10000000     
                 else:
                     raise ValueError("No valid key found in lane dictionary")
-                
+
                 if lane[0]["laneId"] == connection[0]: #startPoint
                     if xConnectionList == []:
                         xConnectionList.append(lane[0][keywordX]/multiplicator)
@@ -204,13 +204,16 @@ class MainApplication(Frame):
     
     def CalcualteLanesAbsoluteOffsetList(self, mapem):
         intersectionDict = {}
-        
         if "MAPEM" not in mapem:
             self.warningMessage.set("No MAPEM found in file\nOnly .xer and .gser files are supported")
             self.warningLabel.pack()
             return 
 
-        for xmlTag, intersection in mapem["MAPEM"]["map"]["intersections"].items(): 
+        for xmlTag, intersection in mapem["MAPEM"]["map"]["intersections"].items():
+            if "name" in intersection:
+                name = intersection["name"]
+            else:
+                name = self.filename.get().rsplit(".", 1)[0].rsplit("/",1)[1]
             laneDict = {}
             intersection["refPoint"]["lat"] = int(intersection["refPoint"]["lat"])/self._lonLatFloatAccuracy
             intersection["refPoint"]["long"] = int(intersection["refPoint"]["long"])/self._lonLatFloatAccuracy
@@ -267,11 +270,12 @@ class MainApplication(Frame):
                         
                     connectItem = [ startPoint , endPoint, signalGroup]    
                     connectionList.append(connectItem)
-                    
+         
             intersectionDict.update( {"RefPoint": refPoint})
             intersectionDict.update( {"laneDict": laneDict})
             intersectionDict.update( {"connectionList" : connectionList})
         return intersectionDict
+
                 
     def LongLatCalc(self, refPoint, xCentimeters, yCentimeters):
         xMeters = xCentimeters / self._meterToCentimeter
@@ -290,7 +294,7 @@ class MainApplication(Frame):
                                h0 = 0
                                )
         return x/self._meterToCentimeter ,y/self._meterToCentimeter #working with centimeters 
-    
+
     """Validate if the given files are in the same sematic structur, MAPEM or PCAP Export, 
     and if they belong to the same Mapem given by name and framenumber, 
     if not block start button """
@@ -331,6 +335,7 @@ class MainApplication(Frame):
     
     #region GPX-File
     def generateGpxFile(self, intersection):
+
         laneDict = intersection["laneDict"]
         refPoint = intersection["RefPoint"]
         connectionList = intersection["connectionList"]
@@ -400,6 +405,7 @@ class MainApplication(Frame):
         for file in self.selectedFiles:
             gpxfilename =  gpxfilename + file.get().rsplit("/")[-1].rsplit(".", 1)[0] + "---"
         gpxfilename = gpxfilename[0:-3] + ".gpx"
+
         file = open(gpxfilename, "w")
         gpxString = tostring(rootGPX , encoding="utf8").decode("utf8")  #seperate decode, so its no binary string, write to file would fail otherwise
         
@@ -410,7 +416,6 @@ class MainApplication(Frame):
  
         logging.info("GPX generation Thread finishing")
     #endregion
-    
     
     #region Parse Pcap File
     
@@ -575,6 +580,7 @@ class MainApplication(Frame):
             return mapemDictList
         self.warningLabel.pack()
         self.warningMessage.set(givenMapemCheckResult[1])
+
 #endregion
         
 
