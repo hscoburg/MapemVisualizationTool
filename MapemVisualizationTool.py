@@ -7,6 +7,7 @@ import pymap3d as pm
 import matplotlib.pyplot as plt
 import random
 import tkinter.filedialog as fd
+import re
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from tkinter import StringVar, BooleanVar, LabelFrame, Label, Checkbutton, Button, Frame
@@ -24,6 +25,7 @@ class MainApplication(Frame):
         self.parent = parent
         
         self.selectedFiles = []
+        self.mapems = []
         self.actionMessage = StringVar()
         self.warningMessage = StringVar()
         printGraph = BooleanVar()
@@ -67,7 +69,7 @@ class MainApplication(Frame):
         self.warningMessage.set("")
         self.warningLabel.pack_forget()  
         
-        self.GetFilesAsListsOfDicts(self.selectedFiles)   
+        self.mapems = self.GetFilesAsListsOfDicts(self.selectedFiles)   
     
     def Click(self, event):
         #self.filename.set(fd.askopenfilenames(parent= root, title='Choose a file', filetypes=[('MAPEM files', '*.xer;*.gser;*.json;*.xml')]))
@@ -86,7 +88,7 @@ class MainApplication(Frame):
             self.warningMessage.set("")
             self.warningLabel.pack_forget()
             
-            self.GetFilesAsListsOfDicts(self.selectedFiles)   
+            self.mapems = self.GetFilesAsListsOfDicts(self.selectedFiles)   
     
     def StartButton(self, printGraph, generateGPX):
         self.warningLabel.pack_forget()     
@@ -105,9 +107,8 @@ class MainApplication(Frame):
         connectionLanes = []
         refPoint = None
         intersectionDict = {"laneDict": {}, "connectionList": [], "RefPoint": {}} 
-        for filename in filenames:
-            fileAsDict = self.GetFileAsDict(filename.get())
-            new_intersectionsDict = self.CalcualteLanesAbsoluteOffsetList(fileAsDict)
+        for mapem in self.mapems:
+            new_intersectionsDict = self.CalcualteLanesAbsoluteOffsetList(mapem)
             intersectionDict["laneDict"].update(new_intersectionsDict["laneDict"])
             intersectionDict["connectionList"].extend(new_intersectionsDict["connectionList"])
             intersectionDict["RefPoint"] = new_intersectionsDict["RefPoint"]
@@ -176,9 +177,10 @@ class MainApplication(Frame):
                     keywordX= "Lon"
                     keywordY= "Lat"
                     multiplicator = 10000000
-                else:
-                    print("not suPPORTED ") #TODO throw error
                     
+                else:
+                    raise ValueError("No valid key found in lane dictionary")
+                
                 if lane[0]["laneId"] == connection[0]: #startPoint
                     if xConnectionList == []:
                         xConnectionList.append(lane[0][keywordX]/multiplicator)
@@ -310,7 +312,8 @@ class MainApplication(Frame):
                 id = dict["MAPEM"]["map"]["intersections"]["IntersectionGeometry"]["id"]
             else:
                 if id != dict["MAPEM"]["map"]["intersections"]["IntersectionGeometry"]["id"]:
-                    return [False, "Intersection Id different"]
+                    return [False, "Intersection Id is different"]
+                    
             currentLayerId = int(dict["MAPEM"]["map"]["layerID"]) - maxLayers * 10
             if currentLayerId > maxLayers:
                 return [False, "LayerId not in range"]
@@ -408,86 +411,170 @@ class MainApplication(Frame):
         logging.info("GPX generation Thread finishing")
     #endregion
     
+    
     #region Parse Pcap File
-    def ParsePcapFileToMapemDict(self, pcapDict):
-        for frameFromPCAP in pcapDict[0]["frames"]:
-            print("frame: ", frameFromPCAP)
-        return dict
     
-    #region Parse File
-    def GetFileAsDict(self, filename):
-        dict = None
-        
-        #parsing the file as mapem from json or xml, since we cant ensure the file ending to be correct (.xer.gser) we just try to parse and if it fails it fails.
-        #TODO: maybe dont do it with exception handeling, but by the file given ...
-        try:
-            with open(filename, 'r', encoding='utf-8') as file:
-                xmlStr = file.read()
-                dict = xmltodict.parse(xmlStr) 
+    '''
+    This method handles the dictionary given by a pcap export from wireshark.
+    It usese the EtsiSubstring to identify the keys that need to be changed for the mapem bc. usually those keys start with "its-v2.".
+    many elements have the suffix "_element" or "_tree" which are not needed for the mapem, so they will be removed.
+    However, the "_tree" elements are duplicated by other elemnts, which have the same name, but just give the len of the following tree structure, those need to be overwritten.
+    Furthermore lists have a different structure, the key of the listelements are "Item 0" counting upwards, the regualr expression cobnverts those into a list.    
+    '''
+    #def remove_substring_from_keys(self, data, etsiSubstring, fullyRemoveSubstring, overwriteSubstring):
+    def remove_substring_from_keys(self, data, substring1, substring2, substring3):
+        if isinstance(data, dict):
+            new_dict = {}
+
+            for key, value in data.items():
+                # Nur Keys mit gewünschtem Prefix bearbeiten
+                if substring1 not in key:
+                    continue
+
+                # Ist ein "_tree"-Key?
+                if key.endswith(substring3):
+                    base_key = key.replace(substring1, "").replace(substring3, "")
+                    tree_dict = value
+
+                    # Nur wenn Items vorhanden
+
+                    if isinstance(tree_dict, dict) and "Item 0" in tree_dict:
+                        first_item = tree_dict["Item 0"]
+                        if isinstance(first_item, dict):
+                            # Hole den ersten element-Key aus "Item 0"
+                            element_key = next(iter(first_item))
+                            element_type = element_key.replace(substring1, "").replace(substring2, "")
+                            list_key = base_key
+
+                            # Baue Liste aller "_element"-Einträge
+                            elements = []
+                            for item in tree_dict.values():
+                                if isinstance(item, dict) and element_key in item:
+                                    cleaned = self.remove_substring_from_keys(
+                                        item[element_key],
+                                        substring1, substring2, substring3
+                                    )
+                                    elements.append(cleaned)
+                            if len(elements) == 1:
+                                newDict2= {element_type:  elements[0]}
+                            else:
+                                newDict2 = {element_type: elements}
+                            if type(new_dict[list_key]) is str:
+                                new_dict[list_key] = []
+                            new_dict[list_key] = (newDict2)
+                    
+                    elif isinstance(tree_dict, dict) and any(key.endswith("_tree") for key in tree_dict):
+                        list_key = base_key
+                        element_key =  next((key for key in tree_dict if key.endswith("_tree")), None)
+                        element_type = element_key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
                         
-        except xml.parsers.expat.ExpatError:  
-            pass
-        
-        try: 
-            file = open(filename)
-            dict = json.load(file)
-                   
-        except json.JSONDecodeError:
-            pass
-        
-        try:
-            if dict[0]["_type"] == "pcap_file":
-                print("pcap file detected")
-                dict = self.ParsePcapFileToMapemDict(dict)
-        except KeyError:
-            pass
-        #TODO: handle pcap exports!!!
-        
-        return dict
+                        elements = []
+                        new_dict3 = {}
+                        for items in tree_dict.values():
+                            if isinstance(items, dict) and "Item 0" in items:
+                                for itemKey in list(items.keys()):
+                                    
+                                    cleaned = self.remove_substring_from_keys(
+                                        items[itemKey],
+                                        substring1, substring2, substring3
+                                    )
+                                    subElementKey = next(iter(cleaned)) 
+                                    elements.append(list(cleaned.values())[0])
+                        
+                        
+                        if len(elements) == 1:
+                            new_dict3 = {subElementKey: elements[0]}
+                        elif len(elements) > 1:
+                            new_dict3 = { subElementKey: elements}
+                        
+                        newDict2 = {element_type: new_dict3}
+                        if type(new_dict[list_key]) is str:
+                            new_dict[list_key] = []
+                        new_dict[list_key] = (newDict2)
+                    
+                    elif isinstance(tree_dict, dict) and any(key.endswith("_element") for key in tree_dict):
+                        list_key = base_key
+                        element_key =  next((key for key in tree_dict if key.endswith("_element")), None)
+                        element_type = element_key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
+                        
+                        elements = []
+                        new_dict3 = {}
+                        for items in tree_dict.values():
+                            if isinstance(items, dict):
+                                for itemKey in list(items.keys()):
+                                    
+                                    cleaned = self.remove_substring_from_keys(
+                                        items[itemKey],
+                                        substring1, substring2, substring3
+                                    )
+                                    new_dict3[itemKey.replace(substring1, "")] = cleaned
+                        
+                        newDict2 = {element_type: new_dict3}
+                        if type(new_dict[list_key]) is str:
+                            new_dict[list_key] = []
+                        new_dict[list_key] = newDict2
+                            
+                        
+                else:
+                    cleaned_key = key.replace(substring1, "").replace(substring2, "").replace(substring3, "")
+                    new_dict[cleaned_key] = self.remove_substring_from_keys(value, substring1, substring2, substring3)
+                    
+            return new_dict
+        elif isinstance(data, list):
+            return [self.remove_substring_from_keys(item, substring1, substring2, substring3) for item in data]
+        else:
+            return data
+            
     
-    #TODO: delete methode above, when done
+    def ParsePcapFileToMapemDict(self, pcapDict):
+        mapemDictList = []
+        itsVersion = next(iter(pcapDict[0]["_source"]["layers"]["etsiits"])).split(".")[0] + "."
+        
+        for frameFromPCAP in pcapDict:
+            mapemElment = frameFromPCAP["_source"]["layers"]["etsiits"]
+            
+            mapemDict = self.remove_substring_from_keys(mapemElment, itsVersion, "_element", "_tree")
+            
+            mapemDictList.append(mapemDict)
+        return mapemDictList
+    
     def GetFilesAsListsOfDicts(self, filenameList):
         
-        dictList = []
+        mapemDictList = []
         
         for filename in filenameList:
-            dict = None
+            mapemDict = None
             
             #parsing the file as mapem from json or xml, since we cant ensure the file ending to be correct (.xer.gser) we just try to parse and if it fails it fails.
             #TODO: maybe dont do it with exception handeling, but by the file given ...
             try:
                 with open(filename.get(), 'r', encoding='utf-8') as file:
                     xmlStr = file.read()
-                    dict = xmltodict.parse(xmlStr) 
+                    mapemDict = xmltodict.parse(xmlStr) 
                             
             except xml.parsers.expat.ExpatError:  
                 pass
             
             try: 
                 file = open(filename.get())
-                dict = json.load(file)
+                mapemDict = json.load(file)
                     
             except json.JSONDecodeError:
                 pass
             
             try:
-                if dict[0]["_type"] == "pcap_file":
-                    print("pcap file detected")
-                    dict = self.ParsePcapFileToMapemDict(dict)
+                if mapemDict[0]["_type"] == "pcap_file":
+                    mapemDictList = self.ParsePcapFileToMapemDict(mapemDict)
             except KeyError:
+                mapemDictList.append(mapemDict)
                 pass
-            #TODO: handle pcap exports!!!
             
-            dictList.append(dict)
             
-        givenMapemCheckResult = self.GivenFilesHandleSameMAPEM(dictList)	
+        givenMapemCheckResult = self.GivenFilesHandleSameMAPEM(mapemDictList)	
         if givenMapemCheckResult[0]:
-            return dictList
+            return mapemDictList
         self.warningLabel.pack()
         self.warningMessage.set(givenMapemCheckResult[1])
-        #TODO: muss hier noch mehr gemaht werden? 
-            
-    
 #endregion
         
 
